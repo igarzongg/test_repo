@@ -1,0 +1,140 @@
+# Explicación del Código en R
+
+## Carga de Librerías
+
+El código comienza con la carga de varias librerías necesarias para la manipulación y análisis de datos:
+
+```r
+library("pacman")
+p_load(rio, tidyverse, skimr, gridExtra, visdat, corrplot, stargazer,
+       dplyr, rvest, caret, boot, MASS, mosaic, officer, flextable, grid, lintr)
+```
+
+- `pacman` se usa para cargar y gestionar paquetes de manera eficiente.
+- `rio` facilita la importación/exportación de datos.
+- `tidyverse` incluye una colección de paquetes para manipulación y visualización de datos.
+- `skimr` permite generar resúmenes estadísticos.
+- `rvest` facilita la extracción de datos desde sitios web.
+- `caret`, `boot`, `MASS` y `mosaic` se usan para modelado estadístico y análisis.
+- `officer` y `flextable` ayudan en la creación de reportes.
+
+## Importación de Bases de Datos
+
+Se extraen tablas desde un conjunto de páginas web y se combinan en un solo dataframe:
+
+```r
+all_tables <- list()
+b_url <- "https://ignaciomsarmiento.github.io/GEIH2018_sample/pages/geih_page_"
+for (i in 1:10){
+  url <- paste0(b_url, i , ".html")
+  tab <- read_html(url) %>% html_element("table") %>% html_table()
+  all_tables[[i]] <- tab
+}
+db <- bind_rows(all_tables)
+```
+
+## Limpieza de Datos
+
+Se revisa la estructura de los datos y se realiza un filtrado inicial:
+
+```r
+skim(db)
+summary(db$age)
+```
+
+Se genera una tabla resumen de la variable `ocu`, que indica si una persona está empleada:
+
+```r
+freq_table_ocu <- table(db$ocu)
+prop_table_ocu <- prop.table(freq_table_ocu)
+summary_table_ocu <- data.frame(Status = c("0 (N/Employed)", "1 (Employed)"),
+                                Count = as.numeric(freq_table_ocu),
+                                Proportion = round(as.numeric(prop_table_ocu), 4))
+print(summary_table_ocu, row.names = FALSE)
+```
+
+Se filtran los datos para incluir solo individuos de 18 años o más:
+
+```r
+db <- db %>% filter(age > 18, ocu == 1)
+```
+
+La variable `sex` se transforma para que `1` represente a mujeres:
+
+```r
+db <- db %>% mutate(female = ifelse(sex == 0, 1, 0))
+```
+
+## Análisis de Ingresos
+
+Se revisa la distribución de los salarios nominales y reales:
+
+```r
+summary(db$y_ingLab_m_ha)
+ggplot(db, aes(x = y_ingLab_m_ha )) +
+  geom_histogram(bins = 50, fill = "darkblue") +
+  labs(x = "Total Hourly Nominal Income", y = "N. Obs") +
+  theme_bw()
+```
+
+Se generan las versiones logarítmicas de las variables de ingresos:
+
+```r
+db <- db %>% mutate(log_nominal_income = ifelse(y_ingLab_m_ha > 0, log(y_ingLab_m_ha), 0))
+db <- db %>% mutate(log_real_income = ifelse(y_salary_m_hu > 0, log(y_salary_m_hu), 0))
+```
+
+## Análisis de Valores Perdidos
+
+Se identifican y visualizan las variables con valores ausentes:
+
+```r
+db_miss <- skim(db) %>% dplyr::select(skim_variable, n_missing)
+db_miss <- db_miss %>% mutate(p_missing = n_missing / nrow(db)) %>% filter(n_missing != 0)
+vis_dat(db_miss)
+```
+
+## Creación de Variables de Interés
+
+Se crean nuevas variables para jefe de hogar, horas trabajadas y sector de empleo:
+
+```r
+db <- db %>% mutate(H_Head = ifelse(p6050 == 1, 1, 0))
+db <- db %>% mutate(Weekly_Hours_Worked = totalHoursWorked)
+db <- db %>% mutate(Employment_Sector = relab)
+```
+
+## Imputación de Valores Faltantes
+
+Se imputan valores faltantes de ingresos usando la mediana, diferenciando entre trabajadores formales e informales:
+
+```r
+median_y_formal0 <- median(db$log_nominal_income[db$formal == 0], na.rm = TRUE)
+db$log_nominal_income <- ifelse(is.na(db$log_nominal_income) & db$formal == 0,
+                                median_y_formal0, db$log_nominal_income)
+```
+
+Se repite el proceso para los ingresos reales:
+
+```r
+median_y_salary0 <- median(db$log_real_income[db$formal == 0], na.rm = TRUE)
+db$log_real_income <- ifelse(is.na(db$log_real_income) & db$formal == 0,
+                             median_y_salary0, db$log_real_income)
+```
+
+## Tratamiento de Valores Atípicos
+
+Se realiza una "winsorización" para limitar los valores extremos:
+
+```r
+up_threshold_nomh <- quantile(db$log_nominal_income, 0.975, na.rm = TRUE) - 0.001
+db$log_nominal_income <- ifelse(db$log_nominal_income > up_threshold_nomh,
+                                up_threshold_nomh, db$log_nominal_income)
+```
+
+El proceso se repite para los ingresos reales y horas trabajadas.
+
+---
+
+Este markdown describe paso a paso lo que realiza el código, facilitando su comprensión y replicabilidad.
+
